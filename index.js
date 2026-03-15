@@ -10,8 +10,12 @@ app.use(cors());
 const client = new Client({
   intents: [
     GatewayIntentBits.Guilds,
-    GatewayIntentBits.GuildMembers
-  ]
+    GatewayIntentBits.GuildMembers,
+  ],
+});
+
+app.get("/", (req, res) => {
+  res.send("Watancraft Discord API is running");
 });
 
 app.get("/team/:roleId", async (req, res) => {
@@ -20,29 +24,37 @@ app.get("/team/:roleId", async (req, res) => {
     await guild.members.fetch();
 
     const role = await guild.roles.fetch(req.params.roleId);
+
     if (!role) {
       return res.status(404).json({ error: "Role not found" });
     }
 
-    const members = role.members.map(member => ({
+    const members = role.members.map((member) => ({
       id: member.user.id,
       username: member.user.username,
       displayName: member.displayName,
-      avatar: member.user.displayAvatarURL({ size: 256 })
+      avatar: member.user.displayAvatarURL({ size: 256 }),
     }));
 
     res.json(members);
   } catch (error) {
-    console.error(error);
-    res.status(500).json({ error: "Failed to fetch role members" });
+    console.error("Route error:", error);
+    res.status(500).json({
+      error: "Failed to fetch role members",
+      details: error.message,
+    });
   }
 });
 
-client.once("ready", () => {
+client.once("clientReady", () => {
+  console.log(`Logged in as ${client.user.tag}`);
+
   const port = process.env.PORT || 10000;
   app.listen(port, () => {
     console.log(`API running on port ${port}`);
   });
 });
 
-client.login(process.env.DISCORD_TOKEN);
+client.login(process.env.DISCORD_TOKEN).catch((err) => {
+  console.error("Discord login failed:", err);
+});
