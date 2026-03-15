@@ -45,4 +45,4 @@ client.once("ready", () => {
   });
 });
 
-client.login(process.env.MTM5OTE5NzkzMDc2MTYyMTY0Nw.GUtGse.SpKocplXJfEXao-mZXxcRSctCsHmxuyvITIE2U);
+client.login(process.env.DISCORD_TOKEN);
