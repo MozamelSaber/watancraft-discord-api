@@ -20,11 +20,12 @@ app.get("/", (req, res) => {
 
 app.get("/team/:roleId", async (req, res) => {
   try {
-    const guild = await client.guilds.fetch(process.env.GUILD_ID);
-    await guild.members.fetch();
+    const guild = client.guilds.cache.get(process.env.GUILD_ID);
+    if (!guild) {
+      return res.status(500).json({ error: "Guild not found in cache" });
+    }
 
-    const role = await guild.roles.fetch(req.params.roleId);
-
+    const role = guild.roles.cache.get(req.params.roleId);
     if (!role) {
       return res.status(404).json({ error: "Role not found" });
     }
@@ -33,7 +34,7 @@ app.get("/team/:roleId", async (req, res) => {
       id: member.user.id,
       username: member.user.username,
       displayName: member.displayName,
-      avatar: member.user.displayAvatarURL({ size: 256 }),
+      avatar: member.user.displayAvatarURL({ size: 128 }),
     }));
 
     res.json(members);
@@ -46,13 +47,24 @@ app.get("/team/:roleId", async (req, res) => {
   }
 });
 
-client.once("clientReady", () => {
-  console.log(`Logged in as ${client.user.tag}`);
+client.once("clientReady", async () => {
+  try {
+    console.log(`Logged in as ${client.user.tag}`);
 
-  const port = process.env.PORT || 10000;
-  app.listen(port, () => {
-    console.log(`API running on port ${port}`);
-  });
+    const guild = await client.guilds.fetch(process.env.GUILD_ID);
+    console.log(`Connected to guild: ${guild.name}`);
+
+    console.log("Caching guild members...");
+    await guild.members.fetch();
+    console.log(`Cached ${guild.members.cache.size} members`);
+
+    const port = process.env.PORT || 10000;
+    app.listen(port, () => {
+      console.log(`API running on port ${port}`);
+    });
+  } catch (error) {
+    console.error("Startup error:", error);
+  }
 });
 
 client.login(process.env.DISCORD_TOKEN).catch((err) => {
