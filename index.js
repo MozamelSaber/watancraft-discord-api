@@ -2,22 +2,23 @@ require("dotenv").config();
 
 const express = require("express");
 const cors = require("cors");
-const { Client, GatewayIntentBits } = require("discord.js");
+const { Client, GatewayIntentBits, Events } = require("discord.js");
 
 const app = express();
 app.use(cors());
 
 const PORT = process.env.PORT || 10000;
 const DISCORD_TOKEN = (process.env.DISCORD_TOKEN || "").trim();
+const GUILD_ID = (process.env.GUILD_ID || "").trim();
 
 const client = new Client({
-  intents: [GatewayIntentBits.Guilds],
+  intents: [GatewayIntentBits.Guilds, GatewayIntentBits.GuildMembers],
 });
 
 let botReady = false;
 
 app.get("/", (req, res) => {
-  res.send("API is running");
+  res.send("Watancraft Discord API is running");
 });
 
 app.get("/health", (req, res) => {
@@ -29,17 +30,49 @@ app.get("/health", (req, res) => {
   });
 });
 
+app.get("/team/:roleId", async (req, res) => {
+  try {
+    if (!botReady) {
+      return res.status(503).json({ error: "Discord bot is still starting" });
+    }
+
+    const guild = await client.guilds.fetch(GUILD_ID);
+    await guild.roles.fetch();
+    await guild.members.fetch();
+
+    const role = guild.roles.cache.get(req.params.roleId);
+    if (!role) {
+      return res.status(404).json({ error: "Role not found" });
+    }
+
+    const members = role.members.map((member) => ({
+      id: member.user.id,
+      username: member.user.username,
+      displayName: member.displayName,
+      avatar: member.user.displayAvatarURL({ size: 128 }),
+    }));
+
+    res.json(members);
+  } catch (error) {
+    console.error("Route error:", error);
+    res.status(500).json({
+      error: "Failed to fetch role members",
+      details: error.message,
+    });
+  }
+});
+
 app.listen(PORT, () => {
   console.log(`API running on port ${PORT}`);
 });
 
-client.once("ready", () => {
-  console.log(`Logged in as ${client.user.tag}`);
+client.once(Events.ClientReady, (readyClient) => {
+  console.log(`Logged in as ${readyClient.user.tag}`);
   botReady = true;
-  console.log("Bot ready");
+  console.log("Discord bot is fully ready");
 });
 
-client.on("error", (err) => {
+client.on(Events.Error, (err) => {
   console.error("Client error:", err);
 });
 
