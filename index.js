@@ -2,7 +2,6 @@ require("dotenv").config();
 
 const express = require("express");
 const cors = require("cors");
-const { Client, GatewayIntentBits, Events } = require("discord.js");
 
 const app = express();
 app.use(cors());
@@ -11,17 +10,55 @@ const PORT = process.env.PORT || 10000;
 const DISCORD_TOKEN = (process.env.DISCORD_TOKEN || "").trim();
 const GUILD_ID = (process.env.GUILD_ID || "").trim();
 
-const client = new Client({
-  intents: [GatewayIntentBits.Guilds, GatewayIntentBits.GuildMembers],
-});
+const API_BASE = "https://discord.com/api/v10";
+const CACHE_TTL = 24 * 60 * 60 * 1000; // 24 hours
 
-let botReady = false;
+const cache = new Map();
 
-console.log("Starting Watancraft Discord API...");
-console.log("Node version:", process.version);
-console.log("PORT:", PORT);
-console.log("GUILD_ID:", GUILD_ID ? "OK" : "MISSING");
-console.log("DISCORD_TOKEN:", DISCORD_TOKEN ? "OK" : "MISSING");
+function getUserAvatar(user) {
+  if (!user?.avatar) return null;
+  return `https://cdn.discordapp.com/avatars/${user.id}/${user.avatar}.png?size=128`;
+}
+
+async function discordFetch(path) {
+  const res = await fetch(`${API_BASE}${path}`, {
+    headers: {
+      Authorization: `Bot ${DISCORD_TOKEN}`,
+      "Content-Type": "application/json",
+    },
+  });
+
+  if (!res.ok) {
+    const text = await res.text().catch(() => "");
+    throw new Error(`Discord API ${res.status}: ${text}`);
+  }
+
+  return res.json();
+}
+
+async function fetchAllGuildMembers() {
+  const allMembers = [];
+  let after = "0";
+
+  while (true) {
+    const batch = await discordFetch(
+      `/guilds/${GUILD_ID}/members?limit=1000&after=${after}`
+    );
+
+    if (!Array.isArray(batch) || batch.length === 0) {
+      break;
+    }
+
+    allMembers.push(...batch);
+    after = batch[batch.length - 1].user.id;
+
+    if (batch.length < 1000) {
+      break;
+    }
+  }
+
+  return allMembers;
+}
 
 app.get("/", (req, res) => {
   res.send("Watancraft Discord API is running");
@@ -30,35 +67,42 @@ app.get("/", (req, res) => {
 app.get("/health", (req, res) => {
   res.json({
     apiRunning: true,
-    discordReady: botReady,
-    userTag: client.user?.tag || null,
+    mode: "discord-rest",
+    guildConfigured: !!GUILD_ID,
+    tokenConfigured: !!DISCORD_TOKEN,
     node: process.version,
   });
 });
 
 app.get("/team/:roleId", async (req, res) => {
+  const { roleId } = req.params;
+  const cacheKey = `team:${roleId}`;
+  const now = Date.now();
+
   try {
-    if (!botReady) {
-      return res.status(503).json({ error: "Discord bot is still starting" });
+    const cached = cache.get(cacheKey);
+
+    if (cached && now - cached.timestamp < CACHE_TTL) {
+      return res.json(cached.data);
     }
 
-    const guild = await client.guilds.fetch(GUILD_ID);
-    await guild.roles.fetch();
-    await guild.members.fetch();
+    const members = await fetchAllGuildMembers();
 
-    const role = guild.roles.cache.get(req.params.roleId);
-    if (!role) {
-      return res.status(404).json({ error: "Role not found" });
-    }
+    const filtered = members
+      .filter((member) => Array.isArray(member.roles) && member.roles.includes(roleId))
+      .map((member) => ({
+        id: member.user.id,
+        username: member.user.username,
+        displayName: member.nick || member.user.global_name || member.user.username,
+        avatar: getUserAvatar(member.user),
+      }));
 
-    const members = role.members.map((member) => ({
-      id: member.user.id,
-      username: member.user.username,
-      displayName: member.displayName,
-      avatar: member.user.displayAvatarURL({ size: 128 }),
-    }));
+    cache.set(cacheKey, {
+      timestamp: now,
+      data: filtered,
+    });
 
-    res.json(members);
+    res.json(filtered);
   } catch (error) {
     console.error("Route error:", error);
     res.status(500).json({
@@ -70,43 +114,5 @@ app.get("/team/:roleId", async (req, res) => {
 
 app.listen(PORT, () => {
   console.log(`API running on port ${PORT}`);
+  console.log("Mode: Discord REST API with 24h cache");
 });
-
-client.once(Events.ClientReady, (readyClient) => {
-  console.log(`Logged in as ${readyClient.user.tag}`);
-  botReady = true;
-  console.log("Discord bot is fully ready");
-});
-
-client.on("shardReady", (id) => {
-  console.log(`Shard ${id} ready`);
-});
-
-client.on("shardResume", (id, replayed) => {
-  console.log(`Shard ${id} resumed, replayed ${replayed} events`);
-});
-
-client.on("shardDisconnect", (event, id) => {
-  console.error(`Shard ${id} disconnected with code ${event?.code}`);
-});
-
-client.on("shardReconnecting", (id) => {
-  console.log(`Shard ${id} reconnecting`);
-});
-
-client.on(Events.Error, (err) => {
-  console.error("Discord client error:", err);
-});
-
-(async () => {
-  try {
-    if (!DISCORD_TOKEN) throw new Error("DISCORD_TOKEN is missing");
-    if (!GUILD_ID) throw new Error("GUILD_ID is missing");
-
-    console.log("Attempting Discord login...");
-    await client.login(DISCORD_TOKEN);
-    console.log("client.login() resolved");
-  } catch (err) {
-    console.error("Discord login failed:", err);
-  }
-})();
