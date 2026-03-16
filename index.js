@@ -7,6 +7,8 @@ const { Client, GatewayIntentBits } = require("discord.js");
 const app = express();
 app.use(cors());
 
+const PORT = process.env.PORT || 10000;
+
 const client = new Client({
   intents: [
     GatewayIntentBits.Guilds,
@@ -14,16 +16,27 @@ const client = new Client({
   ],
 });
 
+let botReady = false;
+
 app.get("/", (req, res) => {
   res.send("Watancraft Discord API is running");
 });
 
+app.get("/health", (req, res) => {
+  res.json({
+    ok: true,
+    discordReady: botReady,
+  });
+});
+
 app.get("/team/:roleId", async (req, res) => {
   try {
-    const guild = client.guilds.cache.get(process.env.GUILD_ID);
-    if (!guild) {
-      return res.status(500).json({ error: "Guild not found in cache" });
+    if (!botReady) {
+      return res.status(503).json({ error: "Discord bot is still starting" });
     }
+
+    const guild = await client.guilds.fetch(process.env.GUILD_ID);
+    await guild.members.fetch();
 
     const role = guild.roles.cache.get(req.params.roleId);
     if (!role) {
@@ -47,6 +60,12 @@ app.get("/team/:roleId", async (req, res) => {
   }
 });
 
+// Start web server immediately for Render
+app.listen(PORT, () => {
+  console.log(`API running on port ${PORT}`);
+});
+
+// Discord startup in background
 client.once("clientReady", async () => {
   try {
     console.log(`Logged in as ${client.user.tag}`);
@@ -58,10 +77,8 @@ client.once("clientReady", async () => {
     await guild.members.fetch();
     console.log(`Cached ${guild.members.cache.size} members`);
 
-    const port = process.env.PORT || 10000;
-    app.listen(port, () => {
-      console.log(`API running on port ${port}`);
-    });
+    botReady = true;
+    console.log("Discord bot is ready");
   } catch (error) {
     console.error("Startup error:", error);
   }
