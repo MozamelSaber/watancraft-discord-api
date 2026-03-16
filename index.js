@@ -16,6 +16,7 @@ const client = new Client({
 });
 
 let botReady = false;
+let tokenCheck = null;
 
 app.get("/", (req, res) => {
   res.send("Watancraft Discord API is running");
@@ -27,6 +28,7 @@ app.get("/health", (req, res) => {
     discordReady: botReady,
     userTag: client.user?.tag || null,
     node: process.version,
+    tokenCheck,
   });
 });
 
@@ -73,7 +75,7 @@ client.once(Events.ClientReady, (readyClient) => {
 });
 
 client.on(Events.Error, (err) => {
-  console.error("Client error:", err);
+  console.error("Discord client error:", err);
 });
 
 client.on("shardError", (err) => {
@@ -88,8 +90,46 @@ client.on("shardReconnecting", (id) => {
   console.log(`Shard ${id} reconnecting`);
 });
 
+async function verifyToken() {
+  try {
+    console.log("Checking bot token with Discord REST API...");
+
+    const res = await fetch("https://discord.com/api/v10/users/@me", {
+      headers: {
+        Authorization: `Bot ${DISCORD_TOKEN}`,
+      },
+    });
+
+    const data = await res.json().catch(() => ({}));
+
+    tokenCheck = {
+      ok: res.ok,
+      status: res.status,
+      username: data?.username || null,
+      id: data?.id || null,
+      message: data?.message || null,
+    };
+
+    console.log("Token check result:", tokenCheck);
+  } catch (error) {
+    tokenCheck = {
+      ok: false,
+      status: 0,
+      username: null,
+      id: null,
+      message: error.message,
+    };
+    console.error("Token check failed:", error);
+  }
+}
+
 (async () => {
   try {
+    if (!DISCORD_TOKEN) throw new Error("DISCORD_TOKEN is missing");
+    if (!GUILD_ID) throw new Error("GUILD_ID is missing");
+
+    await verifyToken();
+
     console.log("Attempting Discord login...");
     await client.login(DISCORD_TOKEN);
     console.log("client.login() resolved");
