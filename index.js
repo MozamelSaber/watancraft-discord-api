@@ -2,7 +2,7 @@ require("dotenv").config();
 
 const express = require("express");
 const cors = require("cors");
-const { Client, GatewayIntentBits, Events } = require("discord.js");
+const { Client, GatewayIntentBits } = require("discord.js");
 
 const app = express();
 app.use(cors());
@@ -12,6 +12,7 @@ const DISCORD_TOKEN = (process.env.DISCORD_TOKEN || "").trim();
 const GUILD_ID = (process.env.GUILD_ID || "").trim();
 
 console.log("Starting Watancraft Discord API...");
+console.log("Node version:", process.version);
 console.log("PORT:", PORT);
 console.log("GUILD_ID:", GUILD_ID ? "OK" : "MISSING");
 console.log("DISCORD_TOKEN:", DISCORD_TOKEN ? "OK" : "MISSING");
@@ -30,6 +31,7 @@ app.get("/health", (req, res) => {
   res.json({
     apiRunning: true,
     discordReady: botReady,
+    node: process.version,
     userTag: client.user?.tag || null,
   });
 });
@@ -67,27 +69,16 @@ app.get("/team/:roleId", async (req, res) => {
 });
 
 app.listen(PORT, () => {
-  console.log(`API server running on port ${PORT}`);
+  console.log(`API running on port ${PORT}`);
 });
 
-client.on(Events.ClientReady, async (readyClient) => {
-  try {
-    console.log(`Logged in as ${readyClient.user.tag}`);
-
-    const guild = await client.guilds.fetch(GUILD_ID);
-    console.log(`Connected to guild: ${guild.name}`);
-
-    await guild.roles.fetch();
-    await guild.members.fetch();
-
-    botReady = true;
-    console.log("Discord bot is fully ready");
-  } catch (error) {
-    console.error("Startup error after ready:", error);
-  }
+client.once("ready", () => {
+  console.log(`Logged in as ${client.user.tag}`);
+  botReady = true;
+  console.log("Discord bot is fully ready");
 });
 
-client.on(Events.Error, (error) => {
+client.on("error", (error) => {
   console.error("Discord client error:", error);
 });
 
@@ -110,7 +101,7 @@ client.on("shardReconnecting", (shardId) => {
 
     console.log("Attempting Discord login...");
     await client.login(DISCORD_TOKEN);
-    console.log("client.login() resolved successfully");
+    console.log("client.login() resolved");
   } catch (err) {
     console.error("Discord login failed:", err);
   }
