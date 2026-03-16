@@ -11,9 +11,12 @@ const DISCORD_TOKEN = (process.env.DISCORD_TOKEN || "").trim();
 const GUILD_ID = (process.env.GUILD_ID || "").trim();
 
 const API_BASE = "https://discord.com/api/v10";
-const CACHE_TTL = 24 * 60 * 60 * 1000; // 24 hours
+const CACHE_TTL = 24 * 60 * 60 * 1000; // 24h
 
-const cache = new Map();
+let membersCache = {
+  timestamp: 0,
+  data: null,
+};
 
 function getUserAvatar(user) {
   if (!user?.avatar) return null;
@@ -55,9 +58,33 @@ async function fetchAllGuildMembers() {
     if (batch.length < 1000) {
       break;
     }
+
+    // tiny pause to reduce rate-limit chance
+    await new Promise((resolve) => setTimeout(resolve, 500));
   }
 
   return allMembers;
+}
+
+async function getCachedMembers(forceRefresh = false) {
+  const now = Date.now();
+
+  if (
+    !forceRefresh &&
+    membersCache.data &&
+    now - membersCache.timestamp < CACHE_TTL
+  ) {
+    return membersCache.data;
+  }
+
+  const members = await fetchAllGuildMembers();
+
+  membersCache = {
+    timestamp: now,
+    data: members,
+  };
+
+  return members;
 }
 
 app.get("/", (req, res) => {
@@ -67,26 +94,39 @@ app.get("/", (req, res) => {
 app.get("/health", (req, res) => {
   res.json({
     apiRunning: true,
-    mode: "discord-rest",
+    mode: "discord-rest-cached",
     guildConfigured: !!GUILD_ID,
     tokenConfigured: !!DISCORD_TOKEN,
     node: process.version,
+    cacheAgeSeconds: membersCache.timestamp
+      ? Math.floor((Date.now() - membersCache.timestamp) / 1000)
+      : null,
+    cachedMembers: membersCache.data ? membersCache.data.length : 0,
   });
+});
+
+app.get("/refresh", async (req, res) => {
+  try {
+    const members = await getCachedMembers(true);
+    res.json({
+      ok: true,
+      refreshed: true,
+      members: members.length,
+    });
+  } catch (error) {
+    console.error("Refresh error:", error);
+    res.status(500).json({
+      error: "Failed to refresh cache",
+      details: error.message,
+    });
+  }
 });
 
 app.get("/team/:roleId", async (req, res) => {
   const { roleId } = req.params;
-  const cacheKey = `team:${roleId}`;
-  const now = Date.now();
 
   try {
-    const cached = cache.get(cacheKey);
-
-    if (cached && now - cached.timestamp < CACHE_TTL) {
-      return res.json(cached.data);
-    }
-
-    const members = await fetchAllGuildMembers();
+    const members = await getCachedMembers(false);
 
     const filtered = members
       .filter((member) => Array.isArray(member.roles) && member.roles.includes(roleId))
@@ -96,11 +136,6 @@ app.get("/team/:roleId", async (req, res) => {
         displayName: member.nick || member.user.global_name || member.user.username,
         avatar: getUserAvatar(member.user),
       }));
-
-    cache.set(cacheKey, {
-      timestamp: now,
-      data: filtered,
-    });
 
     res.json(filtered);
   } catch (error) {
@@ -114,5 +149,5 @@ app.get("/team/:roleId", async (req, res) => {
 
 app.listen(PORT, () => {
   console.log(`API running on port ${PORT}`);
-  console.log("Mode: Discord REST API with 24h cache");
+  console.log("Mode: Discord REST API with shared 24h cache");
 });
